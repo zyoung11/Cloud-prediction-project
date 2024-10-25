@@ -1,0 +1,832 @@
+import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
+from torch.utils.data import Dataset
+from pathlib import Path
+from PIL import Image
+import random
+import numpy as np
+from tqdm.auto import tqdm
+from torchvision.utils import save_image
+from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics import structural_similarity as ssim
+from pytorch_msssim import ssim
+import torch.nn.functional as F
+from pytorch_msssim import ssim as ssim_pytorch
+import pandas as pd
+import warnings
+from tkinter import Tk
+from tkinter.filedialog import askopenfilename
+
+warnings.filterwarnings("ignore")
+torch.autograd.set_detect_anomaly(True)
+
+# 获取用户输入是否微调模型
+print(" ")
+root = Tk()
+root.withdraw()
+fine_tune = input("是否微调模型? (Y/N): ").upper() == "Y"
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+# 设置随机种子
+seed = 2345 # 2345第一轮就有画面
+set_seed(seed)
+
+# 设置设备
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.set_num_threads(128)
+print(f"\n使用的设备: {device}\n")
+
+class ImageToImageDataset(Dataset):
+    def __init__(self, input_root_dir, label_root_dir, sequence_length, transform=None):
+        self.input_root_dir = Path(input_root_dir)
+        self.label_root_dir = Path(label_root_dir)
+        self.transform = transform
+        self.sequence_length = sequence_length
+        
+        # 打印路径信息，确保路径正确
+        print(f"输入路径: {self.input_root_dir}")
+        print(f"标签路径: {self.label_root_dir}\n")
+
+        self.image_filenames = sorted([f for f in self.input_root_dir.glob('*.png') if f.is_file()])
+        self.label_filenames = [self.label_root_dir / f.name for f in self.image_filenames]
+
+        # 打印读取到的文件数量
+        print(f"读取到 {len(self.image_filenames)}张 训练图像.")
+        print(f"读取到 {len(self.label_filenames)}张 标签图像.\n")
+
+    def __len__(self):
+        return len(self.image_filenames) - self.sequence_length + 1
+    
+    def __getitem__(self, idx):
+        input_sequence = []
+        for i in range(self.sequence_length):
+            input_image_path = self.image_filenames[idx + i]
+            input_image = Image.open(input_image_path).convert('L')  # 转换为灰度图
+
+            # print(f"Reading image: {input_image_path}")  # 打印文件路径
+            
+            if self.transform:
+                input_image = self.transform(input_image)
+            input_sequence.append(input_image)
+        
+        label_image_path = self.label_filenames[idx + self.sequence_length - 1]
+        label_image = Image.open(label_image_path).convert('L')  # 转换为灰度图
+        if self.transform:
+            label_image = self.transform(label_image)
+        
+        input_sequence = torch.stack(input_sequence, dim=0)
+        return input_sequence, label_image
+
+# 定义转换
+
+transform = transforms.Compose([
+    transforms.Resize((256, 256)),  # 调整图像大小为256x256
+    transforms.ToTensor(),           # 将PIL图像转换为Tensor，同时归一化到[0, 1]
+])
+
+batch_size = int(input("批大小(batch_size): "))
+print("")
+sequence_length = int(input("序列长度(sequence_length): "))
+print("")
+
+train_dataset = ImageToImageDataset(input_root_dir=Path("X_train"),
+                                    label_root_dir=Path("y_true"),
+                                    sequence_length=sequence_length,
+                                    transform=transform)
+
+test_dataset = ImageToImageDataset(input_root_dir=Path('X_test'),
+                                   label_root_dir=Path('y_test'),
+                                   sequence_length=sequence_length,
+                                   transform=transform)
+
+
+# 创建 DataLoader
+train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+
+# ChannelAttention
+class ChannelAttention(nn.Module):
+    def __init__(self, in_channels, reduction=16):
+        super(ChannelAttention, self).__init__()
+        reduced_channels = max(in_channels // reduction, 1)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.fc1 = nn.Conv2d(in_channels, reduced_channels, 1, bias=False)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Conv2d(reduced_channels, in_channels, 1, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = self.fc2(self.relu(self.fc1(self.avg_pool(x))))
+        max_out = self.fc2(self.relu(self.fc1(self.max_pool(x))))
+        out = avg_out + max_out
+        return self.sigmoid(out)
+
+# SpatialAttention
+class SpatialAttention(nn.Module):
+    def __init__(self):
+        super(SpatialAttention, self).__init__()
+        self.conv1 = nn.Conv2d(2, 1, kernel_size=7, padding=3, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x = torch.cat([avg_out, max_out], dim=1)
+        x = self.conv1(x)
+        return self.sigmoid(x)
+
+# CBAM
+class CBAM(nn.Module):
+    def __init__(self, in_channels, reduction=16):
+        super(CBAM, self).__init__()
+        self.channel_attention = ChannelAttention(in_channels, reduction)
+        self.spatial_attention = SpatialAttention()
+
+    def forward(self, x):
+        x = x * self.channel_attention(x)
+        x = x * self.spatial_attention(x)
+        return x
+
+# FusionModule
+class FusionModule(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(FusionModule, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
+        self.conv5 = nn.Conv2d(256, out_channels, kernel_size=3, padding=1)
+        self.leaky_relu = nn.LeakyReLU(0.2)
+
+        # 替换为 CBAM
+        self.cbam1 = CBAM(32)
+        self.cbam2 = CBAM(64)
+        self.cbam3 = CBAM(128)
+        self.cbam4 = CBAM(256)
+        self.cbam5 = CBAM(out_channels)
+
+    def forward(self, x):
+        x = self.leaky_relu(self.conv1(x))
+        x = self.cbam1(x)
+        x = self.leaky_relu(self.conv2(x))
+        x = self.cbam2(x)
+        x = self.leaky_relu(self.conv3(x))
+        x = self.cbam3(x)
+        x = self.leaky_relu(self.conv4(x))
+        x = self.cbam4(x)
+        x = self.leaky_relu(self.conv5(x))
+        x = self.cbam5(x)
+        return x
+
+# SeparationModule
+class SeparationModule(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(SeparationModule, self).__init__()
+        self.deconv1 = nn.ConvTranspose2d(in_channels, 256, kernel_size=3, padding=1)
+        self.deconv2 = nn.ConvTranspose2d(256, 128, kernel_size=3, padding=1)
+        self.deconv3 = nn.ConvTranspose2d(128, 64, kernel_size=3, padding=1)
+        self.deconv4 = nn.ConvTranspose2d(64, 32, kernel_size=3, padding=1)
+        self.deconv5 = nn.ConvTranspose2d(32, out_channels, kernel_size=3, padding=1)
+        self.leaky_relu = nn.LeakyReLU(0.2)
+        
+        # 替换为 CBAM
+        self.cbam1 = CBAM(256)
+        self.cbam2 = CBAM(128)
+        self.cbam3 = CBAM(64)
+        self.cbam4 = CBAM(32)
+        self.cbam5 = CBAM(out_channels)
+
+    def forward(self, x):
+        x = self.leaky_relu(self.deconv1(x))
+        x = self.cbam1(x)
+        x = self.leaky_relu(self.deconv2(x))
+        x = self.cbam2(x)
+        x = self.leaky_relu(self.deconv3(x))
+        x = self.cbam3(x)
+        x = self.leaky_relu(self.deconv4(x))
+        x = self.cbam4(x)
+        x = self.leaky_relu(self.deconv5(x))
+        x = self.cbam5(x)
+        return x
+
+# Swish activation function
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
+class sLSTMCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim, kernel_size, bias):
+        super(sLSTMCell, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.kernel_size = kernel_size
+        self.padding = kernel_size[0] // 2, kernel_size[1] // 2
+        self.bias = bias
+        
+        # Causal convolution with Swish activation for input and forget gates
+        self.conv_ifo = nn.Conv2d(input_dim + hidden_dim, 3 * hidden_dim, kernel_size=4, padding=self.padding, bias=self.bias)
+        self.swish = Swish()
+
+        # Placeholder for height and width of the feature map
+        self.flattened_size = None
+
+        # Block-diagonal linear layer with four heads
+        self.linear_ifoz = None  # Will initialize later when flattened_size is known
+
+        # Group normalization layer (head-wise LayerNorm)
+        self.group_norm = nn.GroupNorm(num_groups=4, num_channels=hidden_dim)
+
+        # Gated MLP with GeLU
+        self.gated_mlp = nn.Sequential(
+            nn.Linear(hidden_dim, int(hidden_dim * 4 / 3)),
+            nn.GELU(),
+            nn.Linear(int(hidden_dim * 4 / 3), hidden_dim)
+        )
+
+        # Pre-LayerNorm residual structure
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+
+    def forward(self, input_tensor, cur_state):
+        h_cur, c_cur = cur_state
+        device = input_tensor.device 
+        batch_size, _, height, width = input_tensor.size()
+
+        # Causal convolution with Swish activation
+        combined = torch.cat([input_tensor, h_cur], dim=1)
+        combined_conv_ifo = self.swish(self.conv_ifo(combined))
+
+        if self.flattened_size is None:
+            self.flattened_size = height * width
+            # Update linear layers to reflect the flattened size; hidden_dim is now self.hidden_dim
+            self.linear_ifoz = nn.ModuleList([nn.Linear(self.hidden_dim * self.flattened_size, self.hidden_dim * self.flattened_size, bias=self.bias).to(device) for _ in range(4)])
+
+        # 确保所有张量在相同的设备上
+        h_cur = h_cur.to(device)
+        c_cur = c_cur.to(device)
+
+        # Print the shape after convolution
+        print(f'combined_conv_ifo.shape: {combined_conv_ifo.shape}')
+
+        # Split the convolution output
+        cc_i, cc_f, cc_o = torch.split(combined_conv_ifo, self.hidden_dim, dim=1)
+
+        # Flatten for linear transformation
+        cc_i_flat = cc_i.view(batch_size, self.hidden_dim * height * width).to(device)
+        cc_f_flat = cc_f.view(batch_size, self.hidden_dim * height * width).to(device)
+        cc_o_flat = cc_o.view(batch_size, self.hidden_dim * height * width).to(device)
+        h_cur_flat = h_cur.view(batch_size, self.hidden_dim * height * width).to(device)
+
+        # Check shapes before applying linear layers
+        print(f'cc_i_flat.shape: {cc_i_flat.shape}, expected shape: ({batch_size}, {self.hidden_dim * self.flattened_size})')
+
+        # Block-diagonal linear transformation
+        i = self.linear_ifoz[0](cc_i_flat)
+        f = self.linear_ifoz[1](cc_f_flat)
+        o = self.linear_ifoz[2](cc_o_flat)
+        z = self.linear_ifoz[3](h_cur_flat)
+
+        # Output the shapes after the linear transformations
+        print(f'After linear, i shape: {i.shape}, f shape: {f.shape}, o shape: {o.shape}, z shape: {z.shape}')
+
+        # Ensure reshaping dimensions do not modify data content
+        reshaped_shape = (batch_size, self.hidden_dim, height, width)
+
+        # Reshape back to image dimensions
+        i = i.view(reshaped_shape)
+        f = f.view(reshaped_shape)
+        o = o.view(reshaped_shape)
+        z = z.view(reshaped_shape)
+
+        # Check the reshaped sizes
+        print(f'After reshaping, i shape: {i.shape}, f shape: {f.shape}, o shape: {o.shape}, z shape: {z.shape}')
+
+        # Update cell state
+        c_next = torch.sigmoid(f) * c_cur + torch.sigmoid(i) * torch.tanh(z)
+
+        # Update hidden state
+        h_next = torch.sigmoid(o) * torch.tanh(c_next)
+
+        # Apply group normalization
+        h_next_norm = self.group_norm(h_next)
+
+        # Gated MLP
+        h_next_mlp = self.gated_mlp(h_next_norm.view(batch_size, -1))
+        h_next_mlp = h_next_mlp.view(reshaped_shape)
+
+        # Add residual connection
+        h_next_residual = h_cur + h_next_mlp
+        h_next_norm_res = self.layer_norm(h_next_residual.view(batch_size, -1))
+        h_next_norm_res = h_next_norm_res.view(reshaped_shape)
+
+        return h_next_norm_res, c_next
+
+
+class mLSTMCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim, kernel_size, bias):
+        super(mLSTMCell, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.kernel_size = kernel_size
+        self.padding = kernel_size[0] // 2, kernel_size[1] // 2
+        self.bias = bias
+
+        # Pre-LayerNorm residual structure
+        self.layer_norm = nn.LayerNorm(input_dim + hidden_dim)
+
+        # Input up-projection
+        self.up_proj_input = nn.Linear(input_dim + hidden_dim, 2 * hidden_dim)
+
+        # Causal convolution
+        self.conv = nn.Conv2d(hidden_dim, hidden_dim, kernel_size=4, padding=self.padding, bias=self.bias)
+
+        # Block-diagonal projection matrices
+        self.proj_q = nn.Linear(hidden_dim, hidden_dim, bias=self.bias)
+        self.proj_k = nn.Linear(hidden_dim, hidden_dim, bias=self.bias)
+
+        # Group normalization layer (head-wise LayerNorm)
+        self.group_norm = nn.GroupNorm(num_groups=4, num_channels=hidden_dim)
+
+        # Gated MLP
+        self.gated_mlp = nn.Sequential(
+            nn.Linear(hidden_dim, int(hidden_dim * 4 / 3)),
+            nn.GELU(),
+            nn.Linear(int(hidden_dim * 4 / 3), hidden_dim)
+        )
+
+    def forward(self, input_tensor, cur_state):
+        h_cur, c_cur = cur_state
+        device = input_tensor.device  # 获取输入张量的设备
+        batch_size, _, height, width = input_tensor.size()
+
+        # 将所有张量移动到相同的设备
+        h_cur = h_cur.to(device)
+        c_cur = c_cur.to(device)
+
+        # Pre-LayerNorm
+        combined = torch.cat([input_tensor, h_cur], dim=1)
+        input_norm = self.layer_norm(combined.view(batch_size, -1)).to(device)
+
+        # Up-projection
+        up_proj = self.up_proj_input(input_norm)
+
+        # Split projection for external output gate and mLSTM cells
+        q_proj, k_proj = torch.split(up_proj, self.hidden_dim, dim=1)
+
+        # Reshape back to image dimensions
+        q_proj = q_proj.view(batch_size, self.hidden_dim, height, width).to(device)
+        k_proj = k_proj.view(batch_size, self.hidden_dim, height, width).to(device)
+
+        # Causal convolution
+        q_conv = self.conv(q_proj)
+
+        # Matrix memory
+        c_next = c_cur + torch.matmul(q_conv.view(batch_size, self.hidden_dim, -1), k_proj.view(batch_size, self.hidden_dim, -1).transpose(1, 2)).view(batch_size, self.hidden_dim, height, width)
+
+        # Update hidden state
+        h_next = torch.tanh(c_next)
+
+        # Add learnable skip connection
+        h_next_skip = h_next + input_tensor
+
+        # Apply group normalization
+        h_next_norm = self.group_norm(h_next_skip)
+
+        # Gated MLP
+        h_next_mlp = self.gated_mlp(h_next_norm.view(batch_size, -1)).to(device)
+        h_next_mlp = h_next_mlp.view(batch_size, self.hidden_dim, height, width)
+
+        # Component-wise gating of the result with external output gate
+        h_next_gated = h_next_mlp * torch.sigmoid(self.proj_q(h_next_skip.view(batch_size, -1)).to(device))
+        h_next_gated = h_next_gated.view(batch_size, self.hidden_dim, height, width)
+
+        return h_next_gated, c_next
+
+# XLSTMCell class
+class XLSTMCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim, kernel_size, bias, slstm_ratio):
+        super(XLSTMCell, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.sLSTM_cell = sLSTMCell(input_dim, hidden_dim, kernel_size, bias)
+        self.mLSTM_cell = mLSTMCell(input_dim, hidden_dim, kernel_size, bias)
+        assert 0 <= slstm_ratio <= 1, "sLSTM ratio must be between 0 and 1"
+        self.slstm_ratio = slstm_ratio
+
+    def forward(self, input_tensor, cur_state):
+        s_h_next, s_c_next = self.sLSTM_cell(input_tensor, cur_state)
+        m_h_next, m_c_next = self.mLSTM_cell(input_tensor, cur_state)
+
+        h_next = self.slstm_ratio * s_h_next + (1 - self.slstm_ratio) * m_h_next
+        c_next = self.slstm_ratio * s_c_next + (1 - self.slstm_ratio) * m_c_next
+
+        return h_next, c_next
+
+class Generator(nn.Module):
+    def __init__(self, input_channels, hidden_channels, num_layers, slstm_ratio):
+        super(Generator, self).__init__()
+        self.fusion = FusionModule(input_channels, hidden_channels)
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_channels
+        self.slstm_ratio = slstm_ratio
+
+        self.convlstm_cells = nn.ModuleList(
+            [XLSTMCell(hidden_channels, hidden_channels, (3, 3), True, slstm_ratio) for _ in range(num_layers)]
+        )
+        self.separation = SeparationModule(hidden_channels, input_channels)
+
+    def forward(self, x):
+        batch_size, time_steps, _, height, width = x.size()
+        device = x.device
+
+        h = [torch.zeros(batch_size, self.hidden_dim, height, width).to(device) for _ in range(self.num_layers)]
+        c = [torch.zeros(batch_size, self.hidden_dim, height, width).to(device) for _ in range(self.num_layers)]
+
+        for t in range(time_steps):
+            x_t = self.fusion(x[:, t])
+            print(f'Fusion output shape: {x_t.shape}')  # 检查Fusion模块的输出
+            for l in range(self.num_layers):
+                h[l], c[l] = self.convlstm_cells[l](x_t, (h[l], c[l]))
+                x_t = h[l]
+                print(f'Layer {l} LSTM output shape: {x_t.shape}')  # 检查LSTM层的输出
+
+        output = self.separation(x_t)
+        print(f'Separation output shape: {output.shape}')  # 检查Separation模块的输出
+        return output.unsqueeze(1)
+
+    
+class Discriminator(nn.Module):
+    def __init__(self, input_channels):
+        super(Discriminator, self).__init__()
+        self.conv1 = nn.Conv2d(input_channels, 64, kernel_size=3, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
+        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)
+        self.conv4 = nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1)
+        self.conv5 = nn.Conv2d(512, 1, kernel_size=1, stride=1, padding=0)
+        
+        self.fc1 = nn.Linear(16 * 16, 1024)
+        self.fc2 = nn.Linear(1024, 256)
+        self.fc3 = nn.Linear(256, 1)
+        
+        self.leaky_relu = nn.LeakyReLU(0.2)
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, x):
+        x = self.leaky_relu(self.conv1(x))
+        x = self.dropout(x)
+        x = self.leaky_relu(self.conv2(x))
+        x = self.dropout(x)
+        x = self.leaky_relu(self.conv3(x))
+        x = self.dropout(x)
+        x = self.leaky_relu(self.conv4(x))
+        x = self.dropout(x)
+        x = self.leaky_relu(self.conv5(x))
+        x = x.view(x.size(0), -1)
+        x = self.leaky_relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.leaky_relu(self.fc2(x))
+        x = self.dropout(x)
+        x = self.fc3(x)
+        return torch.sigmoid(x)
+    
+
+class GeneratorLoss(nn.Module):
+    def __init__(self):
+        super(GeneratorLoss, self).__init__()
+
+    def forward(self, pred, target):
+        pred_last = pred[:, -1, :, :, :]
+        mae_loss = F.l1_loss(pred_last, target)
+        ssim_loss = 1 - ssim(pred_last, target, data_range=1, size_average=True)
+        return mae_loss + ssim_loss
+
+
+class DiscriminatorLoss(nn.Module):
+    def __init__(self):
+        super(DiscriminatorLoss, self).__init__()
+        self.bce_loss = nn.BCELoss()
+
+    def forward(self, real_output, fake_output):
+        real_loss = self.bce_loss(real_output, torch.ones_like(real_output))
+        fake_loss = self.bce_loss(fake_output, torch.zeros_like(fake_output))
+        return real_loss + fake_loss
+    
+
+# 设置设备
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+if fine_tune:
+    pre_trained_gen_path = askopenfilename(title="选择生成器模型")
+    pre_trained_disc_path = askopenfilename(title="选择判别器模型")
+
+    generator = Generator(input_channels=1, hidden_channels=64, num_layers=4, slstm_ratio=0.5).to(device)
+    discriminator = Discriminator(input_channels=1).to(device)
+    generator.load_state_dict(torch.load(pre_trained_gen_path))
+    discriminator.load_state_dict(torch.load(pre_trained_disc_path))
+else:
+    generator = Generator(input_channels=1, hidden_channels=64, num_layers=4, slstm_ratio=0.5).to(device)
+    discriminator = Discriminator(input_channels=1).to(device)
+
+# 设置学习率
+lr = float(input("学习率(默认0.00005): "))
+print("")
+
+# 初始化优化器
+g_optimizer = torch.optim.Adam(generator.parameters(), lr=lr)
+d_optimizer = torch.optim.SGD(discriminator.parameters(), lr=lr)
+
+# 初始化损失函数
+g_loss_fn = GeneratorLoss().to(device)
+d_loss_fn = DiscriminatorLoss().to(device)
+
+
+# 学习率调度器
+g_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(g_optimizer, 
+                                                         mode='min', 
+                                                         factor=0.8, 
+                                                         patience=5, 
+                                                         threshold=0.01, 
+                                                         threshold_mode='rel', 
+                                                         cooldown=5, 
+                                                         #min_lr=0.0001, 
+                                                         #eps=0.0001, 
+                                                         verbose=True)
+
+d_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(g_optimizer, 
+                                                         mode='min', 
+                                                         factor=0.8, 
+                                                         patience=4, 
+                                                         threshold=0.01, 
+                                                         threshold_mode='rel', 
+                                                         cooldown=3, 
+                                                         #min_lr=0.0001, 
+                                                         #eps=0.0001, 
+                                                         verbose=True)
+
+
+# 在设置学习率之后，添加这段代码
+gen_updates = int(input("请输入生成器对判别器的更新比例(2:1|输入2): "))
+print(f"设置成功：判别器每更新 1 次, 生成器更新 {gen_updates} 次.\n")
+
+def train_step(input_seq, target_seq):
+    global gen_updates
+
+    # 生成器前向传播（只计算一次）
+    gen_output = generator(input_seq)
+    
+    # 准备输入
+    fake_input = torch.cat([input_seq[:, -1:], gen_output], dim=1)
+    target_seq_expanded = target_seq.unsqueeze(1)
+    real_input = torch.cat([input_seq[:, -1:], target_seq_expanded], dim=1)
+    real_input = real_input.view(-1, *real_input.shape[2:])
+    fake_input = fake_input.view(-1, *fake_input.shape[2:])
+
+    # 训练判别器
+    discriminator.zero_grad()
+    real_output = discriminator(real_input)
+    fake_output = discriminator(fake_input.detach())
+    d_loss = d_loss_fn(real_output, fake_output)
+    d_loss.backward()
+    d_optimizer.step()
+
+    # 训练生成器
+    generator.zero_grad()
+    g_loss = g_loss_fn(gen_output, target_seq)
+    fake_output = discriminator(fake_input)
+    adversarial_loss = d_loss_fn(fake_output, torch.ones_like(fake_output))
+    total_g_loss = g_loss + 0.1 * adversarial_loss
+    
+    # 梯度累积
+    (total_g_loss / gen_updates).backward()
+    
+    if generator.global_step % gen_updates == 0:
+        g_optimizer.step()
+        generator.zero_grad()
+    
+    generator.global_step += 1
+
+    return g_loss.item(), d_loss.item()
+
+
+def validate(val_loader, generator, discriminator, device, g_loss_fn):
+    generator.eval()
+    discriminator.eval()
+    total_val_loss = 0
+    total_psnr = 0
+    total_rae = 0
+    total_rmse = 0
+    total_ssim = 0
+    total_ssim_mae = 0
+    total_real_score = 0
+    total_fake_score = 0
+    num_samples = 0
+
+    with torch.no_grad():
+        for input_seq, target_seq in val_loader:
+            input_seq, target_seq = input_seq.to(device), target_seq.to(device)
+            gen_output = generator(input_seq)
+            
+            val_loss = g_loss_fn(gen_output, target_seq)
+            total_val_loss += val_loss.item()
+            
+            gen_output = gen_output.squeeze(1)  # 移除时间维度
+            
+            # 准备判别器输入
+            fake_input = torch.cat([input_seq[:, -1:], gen_output.unsqueeze(1)], dim=1)
+            real_input = torch.cat([input_seq[:, -1:], target_seq.unsqueeze(1)], dim=1)
+            real_input = real_input.view(-1, *real_input.shape[2:])
+            fake_input = fake_input.view(-1, *fake_input.shape[2:])
+            
+            # 获取判别器分数
+            real_score = discriminator(real_input).mean().item()
+            fake_score = discriminator(fake_input).mean().item()
+            total_real_score += real_score
+            total_fake_score += fake_score
+            
+            for i in range(gen_output.size(0)):
+                output_img = gen_output[i].cpu()
+                target_img = target_seq[i].cpu()
+
+                # 计算PSNR
+                psnr_value = psnr(target_img.numpy(), output_img.numpy(), data_range=1)
+                total_psnr += psnr_value
+
+                # 计算RAE
+                rae = torch.sum(torch.abs(target_img - output_img)) / torch.sum(torch.abs(target_img))
+                total_rae += rae.item()
+
+                # 计算RMSE
+                mse = torch.mean((target_img - output_img) ** 2)
+                rmse = torch.sqrt(mse)
+                total_rmse += rmse.item()
+
+                # 计算SSIM
+                ssim_value = ssim_pytorch(output_img.unsqueeze(0), target_img.unsqueeze(0), data_range=1, size_average=True).item()
+                total_ssim += ssim_value
+
+                # 计算SSIM结合MAE
+                mae = torch.mean(torch.abs(target_img - output_img))
+                ssim_mae = (1 - ssim_value) + mae.item()
+                total_ssim_mae += ssim_mae
+
+                num_samples += 1
+    
+    avg_val_loss = total_val_loss / len(val_loader)
+    avg_psnr = total_psnr / num_samples
+    avg_rae = total_rae / num_samples
+    avg_rmse = total_rmse / num_samples
+    avg_ssim = total_ssim / num_samples
+    avg_ssim_mae = total_ssim_mae / num_samples
+    avg_real_score = total_real_score / len(val_loader)
+    avg_fake_score = total_fake_score / len(val_loader)
+    
+    return avg_val_loss, avg_psnr, avg_rae, avg_rmse, avg_ssim, avg_ssim_mae, avg_real_score, avg_fake_score
+
+
+model_time_str = input("预测时间: ") # 获取用户输入
+base_dir = Path(model_time_str) # 创建文件夹结构
+model_dir = base_dir / "模型文件"
+log_dir = base_dir / "训练日志"
+gen_model_dir = model_dir / "生成器"
+disc_model_dir = model_dir / "判别器"
+
+# 创建所有必要的文件夹
+for dir in [base_dir, model_dir, log_dir, gen_model_dir, disc_model_dir]:
+    dir.mkdir(parents=True, exist_ok=True)
+print(f"已创建文件夹结构: {base_dir}\n")
+
+image_counter = 1  # 初始化图像计数器
+
+results = {
+    "avg_g_loss": [],
+    "avg_d_loss": [],
+    "val_loss": [],
+    "val_psnr": [],
+    "val_rae": [],
+    "val_rmse": [],
+    "val_ssim": [],
+    "val_ssim_mae": [],
+    "val_real_score": [],
+    "val_fake_score": [],
+    "g_lr": [],
+    "d_lr": []
+}
+
+
+# 训练循环
+num_epochs = int(input("轮数: "))
+
+print('''
+        生成器损失: avg_g_loss   |  判别器损失: avg_d_loss  |  验证集损失: val_loss  |  峰值信噪比: val_psnr 
+        相对误差绝对值: val_rae  |  均方误差: val_rmse      |  结构相似性: val_ssim  |  结构相似性结合平均误差绝对值: val_ssim_mae
+        当前生成器学习率: g_lr   |  当前判别器学习率: d_lr
+      ''')
+
+print("\n 开始训练! \n")
+
+
+# 在主训练循环之前
+best_val_loss = float('inf')
+patience = 100  # 设定早停的耐心参数，即在多少个epoch没有改善时停止训练
+no_improve_epochs = 0
+
+# 在训练循环中
+for epoch in tqdm(range(1, num_epochs+1), initial=1, total=num_epochs, desc="Epochs", unit="轮", colour="cyan"):
+    generator.train()
+    discriminator.train()
+    total_g_loss, total_d_loss = 0, 0
+
+    for input_seq, target_seq in tqdm(train_dataloader, desc="运算量", leave=False, colour="magenta"):
+        input_seq, target_seq = input_seq.to(device), target_seq.to(device)
+        g_loss, d_loss = train_step(input_seq, target_seq)
+        total_g_loss += g_loss
+        total_d_loss += d_loss
+
+    avg_g_loss = total_g_loss / len(train_dataloader)
+    avg_d_loss = total_d_loss / len(train_dataloader)
+    
+    val_loss, val_psnr, val_rae, val_rmse, val_ssim, val_ssim_mae, val_real_score, val_fake_score = validate(test_dataloader, generator, discriminator, device, g_loss_fn)
+
+    print("\n")
+
+    results["avg_g_loss"].append(avg_g_loss)
+    results["avg_d_loss"].append(avg_d_loss)
+    results["val_loss"].append(val_loss)
+    results["val_psnr"].append(val_psnr)
+    results["val_rae"].append(val_rae)
+    results["val_rmse"].append(val_rmse)
+    results["val_ssim"].append(val_ssim)
+    results["val_ssim_mae"].append(val_ssim_mae)
+    results["val_real_score"].append(val_real_score)
+    results["val_fake_score"].append(val_fake_score)
+    results["g_lr"].append(g_optimizer.param_groups[0]["lr"])
+    results["d_lr"].append(d_optimizer.param_groups[0]["lr"])
+
+    results_df = pd.DataFrame(data=results, index=range(1, len(results["avg_g_loss"]) + 1))
+    print(f"{results_df}\n")
+
+
+    # 每5个epoch或在最后一个epoch保存DataFrame
+    if epoch % 5 == 0 or epoch == num_epochs:
+        file_path = log_dir / f'{model_time_str}_training_data_epochs_{epoch}.csv'
+        results_df.to_csv(file_path, index=False)
+        print(f"训练数据已保存到 {file_path}")
+
+        
+    # 早停机制：如果验证集损失改善，则保存模型；否则增加未改善epoch计数
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        no_improve_epochs = 0
+        # 保存最佳模型
+        torch.save(generator.state_dict(), gen_model_dir / f"{model_time_str}_best_generator.pth")
+        torch.save(discriminator.state_dict(), disc_model_dir / f"{model_time_str}_best_discriminator.pth")
+        print(f"已保存最佳模型 (epoch {epoch})")
+    else:
+        no_improve_epochs += 1
+        print(f"验证集损失未改善 (连续 {no_improve_epochs} 次)")
+
+    # 如果超过耐心值，终止训练
+    if no_improve_epochs >= patience:
+        print("验证集损失未改善，训练提前终止。")
+        break
+
+    # 更新学习率
+    g_scheduler.step(val_loss)
+    d_scheduler.step(val_loss)
+
+    # 每5个epoch保存一次模型
+    if epoch % 5 == 0 or epoch == num_epochs:
+        # 保存生成器模型
+        gen_model_path = gen_model_dir / f"{model_time_str}_生成器_模型_epoch_{epoch}.pth"
+        print(f"\n生成器模型保存到: {gen_model_path}")
+        torch.save(generator.state_dict(), gen_model_path)
+        
+        # 保存判别器模型
+        disc_model_path = disc_model_dir / f"{model_time_str}_判别器_模型_epoch_{epoch}.pth"
+        print(f"判别器模型保存到: {disc_model_path}\n")
+        torch.save(discriminator.state_dict(), disc_model_path)
+        
+    # 生成和保存预测结果
+    generator.eval()
+    output_dir = Path('y_pred')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with torch.inference_mode():
+        for i, (X, y) in enumerate(test_dataloader):
+            X, y = X.to(device), y.to(device)
+            preds = generator(X)
+            for j in range(preds.size(0)):
+                save_image(preds[j, 0], output_dir / f'{image_counter}.png')
+                image_counter += 1  # 增加计数器
+
+    if epoch == num_epochs:
+        break

@@ -1,0 +1,135 @@
+import torch
+import torchvision.transforms as transforms
+from torch.utils.data import Dataset
+from pathlib import Path
+from PIL import Image
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
+from matplotlib.colors import LinearSegmentedColormap
+
+# 设置设备
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"\n使用的设备: {device}\n")
+
+class ImageToImageDataset(Dataset):
+    def __init__(self, input_root_dir, label_root_dir, sequence_length, transform=None):
+        self.input_root_dir = Path(input_root_dir)
+        self.label_root_dir = Path(label_root_dir)
+        self.transform = transform
+        self.sequence_length = sequence_length
+        
+        # 打印路径信息，确保路径正确
+        # print(f"Input directory: {self.input_root_dir}")
+        # print(f"Label directory: {self.label_root_dir}")
+
+        self.image_filenames = sorted([f for f in self.input_root_dir.glob('*.jpg') if f.is_file()])
+        self.label_filenames = [self.label_root_dir / f.name for f in self.image_filenames]
+
+        # 打印读取到的文件数量
+        print(f"读取到 {len(self.image_filenames)}张 训练图像.")
+        print(f"读取到 {len(self.label_filenames)}张 标签图像.\n")
+
+    def __len__(self):
+        return len(self.image_filenames) - self.sequence_length + 1
+    
+    def __getitem__(self, idx):
+        input_sequence = []
+        for i in range(self.sequence_length):
+            input_image_path = self.image_filenames[idx + i]
+            input_image = Image.open(input_image_path).convert('L')  # 转换为灰度图
+
+            # print(f"Reading image: {input_image_path}")  # 打印文件路径
+            
+            if self.transform:
+                input_image = self.transform(input_image)
+            input_sequence.append(input_image)
+        
+        label_image_path = self.label_filenames[idx + self.sequence_length - 1]
+        label_image = Image.open(label_image_path).convert('L')  # 转换为灰度图
+        if self.transform:
+            label_image = self.transform(label_image)
+        
+        input_sequence = torch.stack(input_sequence, dim=0)
+        return input_sequence, label_image
+
+# 定义转换
+transform = transforms.Compose([
+    transforms.Resize((256, 256)),  # 调整图像大小为256x256
+    transforms.ToTensor(),           # 将PIL图像转换为Tensor
+    transforms.Normalize(mean=[0.5], std=[0.5])  # 标准化到[-1, 1]范围
+])
+
+# 创建训练和测试数据集
+train_dataset = ImageToImageDataset(input_root_dir=Path("y_pred_3.5"),
+                                    label_root_dir=Path("y_pred_3.5"),
+                                    sequence_length=2, # 设置一段输入多长
+                                    transform=transform)
+
+test_dataset = ImageToImageDataset(input_root_dir=Path('y_pred_3.5'),
+                                   label_root_dir=Path('y_pred_3.5'),
+                                   sequence_length=2, # 设置一段输入多长
+                                   transform=transform)
+
+
+# 创建 DataLoader
+train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=2, shuffle=False) # 设置一批有几个sequence
+test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=2, shuffle=False)
+
+# 随机选取样本
+num_samples_to_show = 3
+sample_indices = random.sample(range(len(train_dataset)), num_samples_to_show)
+
+# 定义颜色
+colors = [(46/255, 4/255, 10/255), 
+         (96/255, 23/255, 27/255),
+         (197/255, 36/255, 47/255),
+         (240/255, 51/255, 35/255),
+         (244/255, 109/255, 45/255),
+         (248/255, 179/255, 53/255),
+         (231/255, 231/255, 79/255),
+         (209/255, 223/255, 76/255),
+         (134/255, 196/255, 63/255),
+         (93/255, 188/255, 71/255),
+         (54/255, 170/255, 70/255),
+         (56/255, 167/255, 74/255),
+         (28/255, 64/255, 90/255),
+         (36/255, 65/255, 135/255),
+         (36/255, 134/255, 176/255),
+         (69/255, 196/255, 209/255),
+         (123/255, 207/255, 209/255),
+         (205/255, 205/255, 205/255),
+         (190/255, 190/255, 190/255),
+         (152/255, 152/255, 152/255),
+         (96/255, 96/255, 96/255),
+         (67/255, 67/255, 67/255)]
+
+# 创建颜色映射
+custom_cmap_22 = LinearSegmentedColormap.from_list("Custom22", colors, N=22)
+
+
+# 使用创建的颜色映射显示图像
+norm = mcolors.Normalize(vmin=-1, vmax=1)  # 根据你的数据调整vmin和vmax
+
+fig, axs = plt.subplots(num_samples_to_show, train_dataset.sequence_length + 1, figsize=(15, 5 * num_samples_to_show))
+
+for row_idx, idx in enumerate(sample_indices):
+    inputs, label = train_dataset[idx]
+    
+    # 显示输入序列
+    for col_idx in range(train_dataset.sequence_length):
+        # 将灰度图像转换为彩色图像
+        img_color = custom_cmap_22(norm(inputs[col_idx].numpy().squeeze()))
+        axs[row_idx, col_idx].imshow(img_color)
+        axs[row_idx, col_idx].axis('off')
+    
+    # 显示标签图像
+    img_color_label = custom_cmap_22(norm(label.numpy().squeeze()))
+    axs[row_idx, train_dataset.sequence_length].imshow(img_color_label)
+    axs[row_idx, train_dataset.sequence_length].axis('off')
+
+
+plt.tight_layout()
+plt.show()
