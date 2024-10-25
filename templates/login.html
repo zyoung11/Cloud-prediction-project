@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>云踪天玑欢迎您</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+    <script src="{{ url_for('static', filename='js/login.js') }}" defer></script>
+</head>
+<body>
+    <div class="login">
+        <h1>Login</h1>
+        <form id="loginForm">
+            <input type="text" id="username" placeholder="账号">
+            <input type="password" id="password" placeholder="密码">
+            <button type="submit" >登录</button>
+            <a role="button" id="registerButton" href="{{ url_for('register') }}"
+                style="text-decoration: none; background-color: rgb(91, 220, 220); 
+                border-radius: 20px; width: 180px; height: 40px; line-height: 35px; 
+                text-align: center; color: #fff; margin-top: 20px; cursor: pointer;">
+                注册
+            </a>
+            <a role="button" id="enterButton" href="{{ url_for('data_mode') }}"disabled></a>
+        </form>
+    </div>
+</body>
+</html>

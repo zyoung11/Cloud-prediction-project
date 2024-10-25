@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>云踪天玑</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/show_2.css') }}">
+    <script src="{{ url_for('static', filename='js/show_2.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.min.js') }}"></script>
+</head>
+<body>
+    <header style="justify-content: center;">
+        <div style="display: flex; align-items: center;">
+            <img src="{{ url_for('static', filename='image/logo.png') }}" alt="logo" style="width: 100px; height: 100px; margin-right: 10px;" class="logo-img"/>
+            <h1>云踪天玑</h1>
+        </div>
+            <button><a href="{{ url_for('data_mode') }}" style="text-decoration: none;">返回</a></button>
+           <button id="show-block1">原图</button>
+            <button id="show-block2">预测图</button>
+            <button id="show-block3">预测图渲染</button>
+    </header>
+
+    <main style="justify-content: center;" style="width: 80%;">
+            <section class="container">
+                <div id="block1" class="block">
+                    <div style="display: flex;">
+                    <div sty1le="align-items: center;">
+                    <div class="image-slider" id="image-slider1"></div>
+                    <div class="pagination" id="pagination1"></div>
+                    </div>
+                    <div style="flex-direction: column;">
+                    <ul id="image-list1" class="image-list"></ul>                  
+                    <aside class="sidebar">
+                        <button id="prev-page1">上一页</button>
+                        <button id="next-page1">下一页</button>
+                        <button id="start-play1">开始播放</button>
+                        <button id="stop-play1">停止播放</button>                       
+                    </aside>
+                </div>
+                </div>
+                </div>
+
+                <div id="block2" class="block">
+                    <div style="display: flex;">
+                    <div sty1le="align-items: center;">
+                    <div class="image-slider" id="image-slider2"></div>
+                    <div class="pagination" id="pagination2"></div>
+                    </div>
+                    <div style="flex-direction: column;">
+                    <ul id="image-list2" class="image-list"></ul>
+                    <aside class="sidebar">
+                        <button id="prev-page2">上一页</button>
+                        <button id="next-page2">下一页</button>
+                        <button id="start-play2">开始播放</button>
+                        <button id="stop-play2">停止播放</button>                       
+                    </aside>
+                    </div>
+                </div>
+                </div>
+
+                <div id="block3" class="block">
+                    <div style="display: flex;">
+                    <div sty1le="align-items: center;">
+                    <div class="image-slider" id="image-slider3"></div>
+                    <div class="pagination" id="pagination3"></div>
+                    </div>
+                    <div style="flex-direction: column;">
+                    <ul id="image-list3" class="image-list"></ul>
+                    <aside class="sidebar">
+                        <button id="prev-page3">上一页</button>
+                        <button id="next-page3">下一页</button>
+                        <button id="start-play3">开始播放</button>
+                        <button id="stop-play3">停止播放</button>                       
+                    </aside>
+                    </div>
+                </div>
+                </div>
+
+            </section>
+            
+        </main>
+</body>
+</html>

@@ -1,0 +1,321 @@
+/* 全局重置样式 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  color: #eee;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: #2b2b2b;
+}
+
+header {
+  background-color: #272727;
+  padding: 10px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+header div {
+  display: flex;
+  align-items: center;
+}
+
+header img {
+  width: 100px;
+  height: 100px;
+  margin-right: 10px;
+}
+
+header button {
+  background-color: #555;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  margin-left: 10px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+header button:hover {
+  background-color: #777;
+}
+
+main {
+  width: 90%; /* 调整宽度为页面的90% */
+  margin: 0 auto; /* 居中 */
+  padding: 20px;
+  display: flex;
+  flex-wrap: wrap; /* 如果内容过多则换行 */
+  align-items: flex-start;
+}
+
+.highlight {
+  background-color: #5f5f5f; /* 或者你喜欢的其他颜色 */
+  font-weight: bold;
+}
+
+.scrollable-block {
+  width: 100%; /* 宽度为父元素的100% */
+  height: auto; /* 高度自动适应 */
+  overflow-y: auto; /* 添加垂直滚动条 */
+  border: 1px solid #ccc; /* 可选：添加边框 */
+  padding: 10px; /* 可选：添加内边距 */
+  box-sizing: border-box; /* 确保内边距和边框包含在高度内 */
+}
+
+.block {
+  flex: 1 1 100%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px; /* 确保每个 block 至少有一定的高度来显示内容 */
+  margin-top: 50px;
+}
+
+.block.active {
+  display: flex;
+}
+.block.active {
+  display: flex; /* 当前显示的区块 */
+}
+
+.container {
+  width: 100%; /* 宽度为父元素的100% */
+  height: auto; /* 高度自动适应 */
+  position: relative;
+  overflow: hidden;
+  background-color: #444;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.3s;
+}
+
+.image-slider {
+  width: 40vw; /* 占据屏幕宽度的60% */
+  height: 40vw;
+  height: auto; /* 高度自动适应 */
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto; /* 居中 */
+}
+
+.image-slider img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  display: none;
+  transition: opacity 0.5s ease-in-out; /* 优化图片切换的过渡效果 */
+}
+
+.image-slider img.active {
+  display: block;
+  opacity: 1;
+}
+
+.pagination {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.pagination button {
+  width: 20%;
+  background-color: #555;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  margin: 0 5px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.pagination button.active {
+  background-color: #777;
+}
+
+.image-list {
+  width: 150%;
+  justify-content: center;
+  margin-top: 20px;
+  font-size: 150%;
+}
+
+.sidebar {
+  width: 100%; /* 在main中，侧边栏也应该是100%宽度 */
+  background-color: #444;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.3s; /* 侧边栏阴影 */
+  display: flex;
+  flex-direction: column;
+  margin-top: 30%;
+}
+
+.sidebar button {
+  background-color: #555;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  font-size: 120%;
+}
+
+.sidebar button:hover {
+  background-color: #777;
+}
+
+.block ul {
+  background-color: #2b2b2b;
+  height: auto; /* 高度自动适应 */
+  margin-left: 10px;
+  list-style-type: none;
+  padding: 0;
+}
+
+.sidebar li {
+  cursor: pointer;
+  padding: 5px;
+  border-bottom: 1px solid #555;
+  transition: background-color 0.3s;
+  margin: 20px 0;
+}
+
+.sidebar li:hover {
+  background-color: #555;
+}
+
+.page-controls button {
+  background-color: #555;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  margin-right: 10px;
+  margin-top: 20px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.page-controls button:hover {
+  background-color: #777;
+}
+
+/* 小屏幕设备 (手机, 小于600px) */
+@media (max-width: 600px) {
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px;
+  }
+
+  header img {
+    width: 50px;
+    height: 50px;
+    margin-right: 0;
+    margin-bottom: 10px;
+  }
+
+  header button {
+    width: 100%;
+    margin-left: 0;
+    margin-bottom: 10px;
+  }
+
+  main {
+    padding: 10px;
+  }
+
+  .image-slider1 {
+    width: 100%; /* 在小屏幕上，图片宽度为100% */
+  }
+
+  .sidebar {
+    width: 100%;
+    margin-top: 20px;
+  }
+
+  .sidebar button {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+
+  .block {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .block aside {
+    margin-top: 20px;
+  }
+}
+
+/* 中等屏幕设备 (平板, 600px - 900px) */
+@media (min-width: 600px) and (max-width: 900px) {
+  header {
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 10px 20px;
+  }
+
+  header img {
+    width: 70px;
+    height: 70px;
+  }
+
+  .image-slider1 {
+    width: 40vw; /* 占据屏幕宽度的60% */
+    height: 40vw;
+  }
+
+  .sidebar {
+    width: 100%;
+    margin-top: 20px;
+  }
+
+  .sidebar button {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+
+  .block {
+    flex-direction: row;
+  }
+
+  .block aside {
+    margin-left: 20px;
+  }
+}
+
+/* 大屏幕设备 (桌面, 大于900px) */
+@media (min-width: 900px) {
+  header {
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 10px 40px;
+  }
+
+  header img {
+    width: 100px;
+    height: 100px;
+  }
+
+  .image-slider1 {
+    width: 40vw; /* 占据屏幕宽度的60% */
+    height: 40vw;
+  }
+
+  .sidebar {
+    width: 100%; /* 在main中，侧边栏也应该是100%宽度 */
+  }
+
+  .block {
+    flex-direction: row;
+  }
+
+  .block aside {
+    margin-left: 20px;
+  }
+}

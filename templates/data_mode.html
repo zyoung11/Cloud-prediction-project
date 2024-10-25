@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}云踪天玑{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script type="module" src="{{ url_for('static', filename='js/canvasDisplay1_0.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/function1.3.js') }}"></script> 
+</head>
+<body>
+    <header style="flex-direction:column ;">
+       <div style="display: flex;align-items: center;background-color: rgb(54, 54, 54);margin-left: 5%;width:90%;" >
+            <img src="{{ url_for('static', filename='image/logo.png') }}" alt="logo"style="width: 100px;height: 100px;margin-right: 10px;" class="logo-img"/>
+            <h1 style="color: white;">云踪天玑</h1>                         
+       </div>
+       <div style="margin-left:5%;width:90%;margin-top: 1%;margin-bottom: 1%;">
+            <button ><a href="{{ url_for('login') }}" style="text-decoration: none;color: white;">返回</a></button>
+            <button ><a href="{{ url_for('show') }}" style="text-decoration: none;color: white;">展示</a></button>
+        </div>    
+    </header>
+    <main >
+        <div class="container" >         
+            <h2 style="color: white;">数据模型</h2>
+            <h2 style="color: white;">上传的文件夹</h2>
+            <form id="upload-form" enctype="multipart/form-data" style="display: none;">
+                <input type="file" id="file-input" name="file" webkitdirectory multiple accept=".png,.jpg,.jpeg,.npy">
+            </form>
+            <button id="upload-btn">选择并上传文件夹</button>
+        
+            <div class="process-section">
+                <h2 style="color: white;">处理图像</h2>
+                <button id="process-btn" disabled>开始处理</button>
+                <button onclick="openFolder()">打开文件夹</button>
+            </div>
+        
+            <div class="log-section">
+                <h2 style="color: white;">日志</h2>
+                <div id="log" style="width: 100%;height: auto;min-height: 100px;background-color: rgb(54, 54, 54);color: white;"></div>
+            </div>
+        
+            <div class="results-section">
+                <h2 style="color: white;">结果</h2>
+                <table id="results-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th >日期</th>
+                            <th >10min</th>
+                            <th >30min</th>
+                            <th >1h</th>
+                            <th >2h</th>
+                            <th >3h</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="pagination" style="display: flex;margin-top: 0.5%;">
+                    <button id="prev-btn" disabled>上一页</button>
+                    <p id="page-info1"></p>
+                    <button id="next-btn">下一页</button>
+                </div>
+            </div>
+        
+            <div class="animation-section">
+                <h2 style="color: white;">动画展示</h2>
+                <div id="animation-container" class="animation-container"></div>
+                <div class="animation-pagination">
+                    <button id="prev-animation">上一页</button>
+                    <p id="page-info2"></p>
+                    <button id="next-animation">下一页</button>
+                </div>
+            </div>
+        </div>
+    </main>
+</body> 
+</html>

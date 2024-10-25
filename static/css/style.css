@@ -1,0 +1,147 @@
+/* 基本样式 */
+html, body {
+    height: 100%;
+    margin: 0;
+    justify-content: center; /* 水平居中 */
+    align-items: center; /* 垂直居中 */
+    background-color: #474747;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse; /* 边框合并 */
+}
+
+.container {
+    width: 90%; /* 占屏幕的90% */
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); /* 可选：添加阴影效果 */
+    margin: auto; /* 这将使容器在其父元素中水平居中，如果父元素足够大 */
+    justify-content: center; /* 水平居中 */
+    align-items: center; /* 垂直居中 */
+}
+
+th, td {
+    border: 1px solid #ddd; /* 可选：边框 */
+    text-align: center; /* 内容居中 */
+    width: 150px;
+    height: 150px;
+}
+td{
+    display: none;
+}
+th {
+    color: white;
+    background-color:  rgb(54, 54, 54);
+}
+
+td img {
+    width: 100%;
+    height: auto;
+}
+
+button {
+    width: 8%;
+    height: 3%;
+    color: white;
+    border: 1px solid #eee;
+    border-radius: 18px;
+    background-color: transparent;
+    transition: box-shadow 0.3s; /* 侧边栏阴影 */
+    font-size: 14px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #949494;
+}
+
+.image-cell img {
+    width: 60%;
+    height: 60%;
+}
+
+.image-cell{
+  display: block;
+}
+
+#animation-container {
+    width: 100%; /* 占父元素的60% */
+    background-color: rgb(109, 109, 109);
+    overflow: hidden;
+}
+
+.animation-container {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 10px;
+}
+
+.animation-container img {
+    width: 40%;
+    height: auto;
+}
+
+.animation-pagination {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+.animation-pagination button {
+    margin: 0 5px;
+    padding: 5px 10px;
+    cursor: pointer; /* 可选：鼠标移上去显示手型 */
+}
+
+/* 媒体查询 */
+@media (max-width: 900px) {
+    .container {
+        width: 90%; /* 占屏幕的90% */
+    }
+
+    #animation-container {
+        width: 100%; /* 占父元素的60% */
+    }
+
+    .animation-container img {
+        width: 40%;
+        height: auto;
+    }
+}
+
+@media (max-width: 600px) {
+    .container {
+        width: 90%; /* 占屏幕的90% */
+    }
+
+    #animation-container {
+        width: 100%; /* 占父元素的60% */
+    }
+
+    .animation-container img {
+        width: 40%;
+        height: auto;
+    }
+
+    /* 调整按钮布局 */
+    .animation-pagination {
+        flex-direction: column;
+        align-items: flex-start; /* 垂直居中 */
+    }
+
+    .animation-pagination button {
+        width: 100%;
+        margin: 5px 0;
+    }
+}
+
+.upload-section {
+    width: 100%;
+}
+
+.container form {  
+    position: relative;  
+    margin-left: -40%;
+}
