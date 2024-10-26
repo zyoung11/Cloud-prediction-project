@@ -10,8 +10,8 @@ import shutil
 import hashlib
 import moviepy.editor as mpy
 from datetime import datetime
-
-
+import time
+from flask import request
 def load_input_images(files):
     input_images = []
 
@@ -267,4 +267,3 @@ def npy_to_png(source_dir):
         # 更新进度
         progress = (i + 1) / len(npy_files) * 100
         print(f"Converted {filename} to {png_filename}, Progress: {progress:.2f}%")
-

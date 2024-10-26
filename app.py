@@ -4,8 +4,13 @@ from werkzeug.utils import secure_filename
 from utils import store_user_data, verify_user_data, load_image, record_current_time, move_folders_to_new_directory, npy_to_png
 from models import run_inference, Generator, load_model
 import webbrowser,subprocess
+import time
+import pygetwindow as gw
+from flask_socketio import SocketIO, disconnect
+
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*", ping_interval=1, ping_timeout=3)  # 可以调高一点比较稳妥,不然可能卡一下就关闭了
 
 # 定义用户数据文件路径
 USER_DATA_FILE = 'Login.txt'
@@ -49,8 +54,6 @@ app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'npy'}
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 os.makedirs(app.config['IMATEST_FOLDER'], exist_ok=True)
-
-
 
 @app.route('/')
 def index():
@@ -173,7 +176,6 @@ def open_folder():
         subprocess.Popen(['xdg-open', OUTPUT_FOLDER_PATH])  # Linux
     return jsonify({"message": "Folder opened"}), 200
 
-
 #区块图片处理相关功能
 @app.route('/api/imatest/<folder>', methods=['GET'])
 def get_images(folder):
@@ -184,17 +186,33 @@ def get_images(folder):
     images = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
     return jsonify(images)
 
+@socketio.on('disconnect')
+def handle_disconnect():
+    print("客户端断开连接")
+    # 超时未收到心跳，关闭服务器
+    window_title = "C:\WINDOWS\system32\cmd.exe"
+    print("准备关闭服务器 at:", time.strftime('%Y-%m-%d %H:%M:%S'))
+    try:
+        window = gw.getWindowsWithTitle(window_title)[0]
+        if window.isMinimized:
+            window.restore()  # 如果窗口最小化，先恢复
+        window.activate()  # 激活窗口
+        window.close()  # 关闭窗口
+        window.close()  # 关闭窗口
+        window.close()  # 关闭窗口
+        print(f"已关闭窗口: {window_title}")
+    except IndexError:
+        print(f"未找到标题为 '{window_title}' 的窗口")
+        window.close()  # 关闭窗口
+    except Exception as e:
+        print(f"发生错误: {e}")
+        window.close()  # 关闭窗口
+
 if __name__ == '__main__':
     move_folders_to_new_directory()
     record_current_time()
     local_server_url = "http://127.0.0.1:5000/"
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
         webbrowser.open(local_server_url)
-    app.run(debug=True)
-
-
-
-
-
-
-   
+    #app.run(debug=True)
+    socketio.run(app, host='127.0.0.1', port=5000, debug=True)
